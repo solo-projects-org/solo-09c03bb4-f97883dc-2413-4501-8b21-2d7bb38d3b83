@@ -3,8 +3,29 @@
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 
 from app.analysis import FeasibleRange
+
+
+def frac(value: Fraction) -> str:
+    """Render an exact fraction, with integers shown without denominator."""
+    if value.denominator == 1:
+        return str(value.numerator)
+    return f"{value.numerator}/{value.denominator}"
+
+
+def approx(value: Fraction, places: int = 6) -> str:
+    """Short decimal approximation of an exact fraction for display."""
+    sign = "-" if value < 0 else ""
+    value = abs(value)
+    scale = 10**places
+    rounded = (value.numerator * scale + value.denominator // 2) // value.denominator
+    whole, tail = divmod(rounded, scale)
+    text = f"{whole}.{tail:0{places}d}".rstrip("0").rstrip(".")
+    if text.endswith("."):
+        text += "0"
+    return sign + text
 
 
 def pct(value: float) -> str:

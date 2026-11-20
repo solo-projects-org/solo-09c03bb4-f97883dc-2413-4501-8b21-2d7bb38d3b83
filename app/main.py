@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import sqlite3
 import urllib.parse
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, AsyncIterator
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -24,8 +25,26 @@ from .analysis import (
     minimal_correction_size,
     retest_rejection,
 )
-from .formatting import grams, interval, pct, prefill_high, prefill_low
+from .formatting import (
+    approx,
+    frac,
+    grams,
+    interval,
+    pct,
+    prefill_high,
+    prefill_low,
+)
+from .package import (
+    PackageError,
+    build_package,
+    check_readings,
+    load_package_bytes,
+    package_filename,
+    package_json,
+    parse_package,
+)
 from .parsing import MAX_FILES, MAX_REPORTS, UploadError, parse_upload
+from .projection import ProjectionError, ProjectionInfeasible
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -34,6 +53,8 @@ TEMPLATES.env.filters["interval"] = interval
 TEMPLATES.env.filters["grams"] = grams
 TEMPLATES.env.filters["prefill_low"] = prefill_low
 TEMPLATES.env.filters["prefill_high"] = prefill_high
+TEMPLATES.env.filters["frac"] = frac
+TEMPLATES.env.filters["approx"] = approx
 
 NOTICE_TEXT = {
     "retest_saved": "复测区间已保存：换用后整批相容，结论已更新。",
@@ -52,7 +73,17 @@ NOTICE_TEXT = {
         "整批现在已经相容，无需再更正该报告，本次复测提交未保存。"
     ),
     "invalid": "复测区间无效，未保存：请填写 0%～100% 内且下限不大于上限的闭区间。",
+    "package_rejected": (
+        "复核出包未生成：整批化验单当前互相矛盾，不存在能同时满足全部报告的"
+        "原样含水率组合。请先按页面提示完成复测更正，待整批相容后再出包。"
+    ),
+    "package_invalid": "复核出包未生成：请选择该批次内两个不同的原样。",
 }
+
+# The package feature targets batches of up to four original samples, matching
+# the external laboratory's recheck workflow.
+PACKAGE_MAX_SAMPLES = 4
+PACKAGE_MIN_SAMPLES = 2
 
 
 @asynccontextmanager
@@ -220,6 +251,7 @@ def batch_detail(
     minimal_group = None
     if not analysis.feasible and not analysis.candidates:
         minimal_group = minimal_correction_size(batch.to_domain(), max_group=2)
+    can_package = PACKAGE_MIN_SAMPLES <= analysis.sample_count <= PACKAGE_MAX_SAMPLES
     return render(
         request,
         "batch.html",
@@ -231,6 +263,9 @@ def batch_detail(
             "notice": notice_from_query(request),
             "submitted": submitted_range(request),
             "minimal_group": minimal_group,
+            "can_package": can_package,
+            "package_min_samples": PACKAGE_MIN_SAMPLES,
+            "package_max_samples": PACKAGE_MAX_SAMPLES,
         },
     )
 
@@ -290,6 +325,128 @@ def submit_retest(
             batch_id, notice=code, report=report_no, low=low, high=high
         )
     return redirect_to_batch(batch_id, notice="retest_saved", report=report_no)
+
+
+# ---------------------------------------------------------------------------
+# External-laboratory review packages
+# ---------------------------------------------------------------------------
+
+@app.post("/batches/{batch_id}/packages")
+def create_package(
+    request: Request,
+    conn: Conn,
+    batch_id: int,
+    revision: Annotated[int, Form()],
+    sample_a: Annotated[str, Form()],
+    sample_b: Annotated[str, Form()],
+) -> Response:
+    batch = db.get_batch(conn, batch_id)
+    if batch is None:
+        return render(request, "not_found.html", {}, status_code=404)
+    sample_a = sample_a.strip()
+    sample_b = sample_b.strip()
+    if batch.revision != revision:
+        return redirect_to_batch(batch_id, notice="stale")
+    present = {
+        use.sample_no
+        for report in batch.reports
+        for use in report.samples
+    }
+    if (
+        not PACKAGE_MIN_SAMPLES <= len(present) <= PACKAGE_MAX_SAMPLES
+        or sample_a == sample_b
+        or sample_a not in present
+        or sample_b not in present
+    ):
+        return redirect_to_batch(batch_id, notice="package_invalid")
+    try:
+        package = build_package(
+            batch.to_domain(),
+            batch_no=batch_id,
+            revision=batch.revision,
+            selected=(sample_a, sample_b),
+        )
+    except ProjectionInfeasible:
+        return redirect_to_batch(batch_id, notice="package_rejected")
+    except ProjectionError:
+        return redirect_to_batch(batch_id, notice="package_invalid")
+    payload = package_json(package)
+    return Response(
+        content=payload,
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{package_filename(package)}"'
+            )
+        },
+    )
+
+
+@app.get("/verify", response_class=HTMLResponse)
+def verify_form(request: Request) -> HTMLResponse:
+    return render(
+        request,
+        "verify.html",
+        {
+            "error": None,
+            "package": None,
+            "result": None,
+            "first": "",
+            "second": "",
+        },
+    )
+
+
+@app.post("/verify", response_class=HTMLResponse)
+async def verify_upload(
+    request: Request,
+    file: Annotated[UploadFile | None, File()] = None,
+    pasted: Annotated[str, Form()] = "",
+    first: Annotated[str, Form()] = "",
+    second: Annotated[str, Form()] = "",
+) -> HTMLResponse:
+    filename = file.filename if file is not None else ""
+    data = await file.read() if file is not None else b""
+    try:
+        if filename:
+            package = load_package_bytes(data, filename)
+        elif pasted and pasted.strip():
+            try:
+                document = json.loads(pasted)
+            except json.JSONDecodeError as exc:
+                raise PackageError(
+                    f"粘贴的内容不是合法 JSON（第 {exc.lineno} 行第 {exc.colno} 列）"
+                ) from exc
+            package = parse_package(document)
+        else:
+            raise PackageError("请上传复核 JSON 文件，或粘贴 JSON 内容")
+        result = check_readings(package, first, second)
+    except PackageError as exc:
+        return render(
+            request,
+            "verify.html",
+            {
+                "error": str(exc),
+                "package": None,
+                "result": None,
+                "first": first,
+                "second": second,
+                "pasted": pasted,
+            },
+            status_code=400,
+        )
+    return render(
+        request,
+        "verify.html",
+        {
+            "error": None,
+            "package": package,
+            "result": result,
+            "first": first,
+            "second": second,
+            "package_document_json": package_json(package),
+        }
+    )
 
 
 @app.get("/healthz")

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -282,3 +283,275 @@ def test_persistence_across_app_restart(tmp_path, monkeypatch):
         assert "复测记录" in page.text
         home = second.get("/")
         assert "冲突批次" in home.text
+
+
+# ---------------------------------------------------------------------------
+# External-laboratory review packages
+# ---------------------------------------------------------------------------
+
+PINNED_BATCH = {
+    "batch_name": "钉死批次",
+    "reports": [
+        {
+            "report_no": "P1",
+            "samples": [{"sample_no": "A", "grams": 10}],
+            "interval": [10, 10],
+        },
+        {
+            "report_no": "P2",
+            "samples": [{"sample_no": "B", "grams": 10}],
+            "interval": [70, 70],
+        },
+        {
+            "report_no": "P3",
+            "samples": [
+                {"sample_no": "A", "grams": 10},
+                {"sample_no": "B", "grams": 10},
+            ],
+            "interval": [40, 40],
+        },
+    ],
+}
+
+
+def test_batch_page_offers_package_panel_for_supported_batches(client):
+    batch_id = batch_id_from(upload(client, PINNED_BATCH))
+    page = client.get(f"/batches/{batch_id}")
+    assert "外协复核出包" in page.text
+    assert "下载复核 JSON" in page.text
+    assert "/verify" in page.text
+
+
+def test_package_download_returns_self_contained_json(client):
+    batch_id = batch_id_from(upload(client, PINNED_BATCH))
+    response = client.post(
+        f"/batches/{batch_id}/packages",
+        data={"revision": "1", "sample_a": "A", "sample_b": "B"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    disposition = response.headers["content-disposition"]
+    assert "attachment" in disposition
+    assert f"batch-{batch_id}" in disposition
+    document = response.json()
+    assert set(document) == {"batch_no", "revision", "samples", "inequalities"}
+    assert document["batch_no"] == batch_id
+    assert document["revision"] == 1
+    assert document["samples"] == ["A", "B"]
+    assert document["inequalities"]
+
+
+def test_package_round_trip_through_verify_page_accepts_and_rejects(client):
+    batch_id = batch_id_from(upload(client, PINNED_BATCH))
+    package_response = client.post(
+        f"/batches/{batch_id}/packages",
+        data={"revision": "1", "sample_a": "A", "sample_b": "B"},
+        follow_redirects=False,
+    )
+    payload = package_response.content
+
+    accepted = client.post(
+        "/verify",
+        files={"file": ("review.json", payload, "application/json")},
+        data={"first": "10", "second": "70"},
+    )
+    assert accepted.status_code == 200
+    assert "通过" in accepted.text
+    assert "满足全部不等式" in accepted.text
+
+    rejected = client.post(
+        "/verify",
+        files={"file": ("review.json", payload, "application/json")},
+        data={"first": "10.1", "second": "70"},
+    )
+    assert rejected.status_code == 200
+    assert "拒绝" in rejected.text
+    assert "违反" in rejected.text
+
+
+def test_verify_accepts_pasted_package_without_original_batch(client):
+    batch_id = batch_id_from(upload(client, PINNED_BATCH))
+    package_response = client.post(
+        f"/batches/{batch_id}/packages",
+        data={"revision": "1", "sample_a": "A", "sample_b": "B"},
+        follow_redirects=False,
+    )
+    text = package_response.text
+    response = client.post(
+        "/verify",
+        data={"file": "", "pasted": text, "first": "10", "second": "70"},
+    )
+    assert response.status_code == 200
+    assert "通过" in response.text
+
+
+def test_verify_rejects_readings_outside_zero_to_hundred(client):
+    batch_id = batch_id_from(upload(client, PINNED_BATCH))
+    payload = client.post(
+        f"/batches/{batch_id}/packages",
+        data={"revision": "1", "sample_a": "A", "sample_b": "B"},
+        follow_redirects=False,
+    ).content
+    response = client.post(
+        "/verify",
+        files={"file": ("review.json", payload, "application/json")},
+        data={"first": "101", "second": "70"},
+    )
+    assert response.status_code == 400
+    assert "0%～100%" in response.text
+
+
+def test_verify_without_package_shows_error(client):
+    response = client.post(
+        "/verify", data={"first": "10", "second": "70"}
+    )
+    assert response.status_code == 400
+    assert "请上传复核 JSON" in response.text
+
+
+def test_verify_rejects_package_with_unknown_field(client):
+    bad = {
+        "batch_no": 1,
+        "revision": 1,
+        "samples": ["A", "B"],
+        "inequalities": [{"a": "1", "b": "0", "c": "100"}],
+        "extra": 1,
+    }
+    response = client.post(
+        "/verify",
+        files={"file": ("x.json", json.dumps(bad).encode(), "application/json")},
+        data={"first": "1", "second": "2"},
+    )
+    assert response.status_code == 400
+    assert "未知字段" in response.text
+
+
+def test_verify_get_page_renders(client):
+    response = client.get("/verify")
+    assert response.status_code == 200
+    assert "外协复核核验" in response.text
+
+
+def test_shipped_example_package_verifies(client):
+    example = (
+        Path(__file__).resolve().parent.parent
+        / "app"
+        / "static"
+        / "examples"
+        / "review_package_example.json"
+    )
+    payload = example.read_bytes()
+    accepted = client.post(
+        "/verify",
+        files={"file": ("review.json", payload, "application/json")},
+        data={"first": "3.9", "second": "4.0"},
+    )
+    assert "通过" in accepted.text
+    rejected = client.post(
+        "/verify",
+        files={"file": ("review.json", payload, "application/json")},
+        data={"first": "5", "second": "5"},
+    )
+    assert "拒绝" in rejected.text
+
+
+def test_infeasible_batch_refuses_package_with_reason(client):
+    batch_id = batch_id_from(upload(client, CONFLICT))
+    # CONFLICT has two samples (A, B) but is contradictory.
+    response = client.post(
+        f"/batches/{batch_id}/packages",
+        data={"revision": "1", "sample_a": "A", "sample_b": "B"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "notice=package_rejected" in response.headers["location"]
+    page = client.get(response.headers["location"])
+    assert "复核出包已拒绝" in page.text
+    assert "互相矛盾" in page.text
+
+
+def test_stale_revision_blocks_package(client):
+    batch_id = batch_id_from(upload(client, CONFLICT))
+    response = client.post(
+        f"/batches/{batch_id}/packages",
+        data={"revision": "99", "sample_a": "A", "sample_b": "B"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "notice=stale" in response.headers["location"]
+
+
+def test_invalid_sample_choice_blocks_package(client):
+    batch_id = batch_id_from(upload(client, PINNED_BATCH))
+    response = client.post(
+        f"/batches/{batch_id}/packages",
+        data={"revision": "1", "sample_a": "A", "sample_b": "NOPE"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "notice=package_invalid" in response.headers["location"]
+
+
+def test_same_sample_choice_blocks_package(client):
+    batch_id = batch_id_from(upload(client, PINNED_BATCH))
+    response = client.post(
+        f"/batches/{batch_id}/packages",
+        data={"revision": "1", "sample_a": "A", "sample_b": "A"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "notice=package_invalid" in response.headers["location"]
+
+
+def test_package_forced_off_for_batch_with_more_than_four_samples(client):
+    five_samples = {
+        "batch_name": "五原样批",
+        "reports": [
+            {
+                "report_no": "F1",
+                "samples": [
+                    {"sample_no": f"S{i}", "grams": 10} for i in range(1, 6)
+                ],
+                "interval": [10, 90],
+            }
+        ],
+    }
+    batch_id = batch_id_from(upload(client, five_samples))
+    page = client.get(f"/batches/{batch_id}")
+    assert "不能出包" in page.text
+    # The hidden panel must not be bypassable by a direct POST.
+    response = client.post(
+        f"/batches/{batch_id}/packages",
+        data={"revision": "1", "sample_a": "S1", "sample_b": "S2"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "notice=package_invalid" in response.headers["location"]
+
+
+def test_package_carries_current_revision_after_retest_correction(client):
+    # CONFLICT becomes compatible after retesting R1; the revision is bumped
+    # and the next package must carry the new revision number.
+    batch_id = batch_id_from(upload(client, CONFLICT))
+    retest = client.post(
+        f"/batches/{batch_id}/retests",
+        data={"revision": "1", "report_no": "R1", "low": "80", "high": "90"},
+        follow_redirects=False,
+    )
+    assert retest.status_code == 303
+    payload = client.post(
+        f"/batches/{batch_id}/packages",
+        data={"revision": "2", "sample_a": "A", "sample_b": "B"},
+        follow_redirects=False,
+    ).json()
+    assert payload["revision"] == 2
+    assert payload["batch_no"] == batch_id
+    # The package built from corrected data must accept the corrected reading.
+    verify = client.post(
+        "/verify",
+        files={"file": ("p.json", json.dumps(payload).encode(), "application/json")},
+        data={"first": "85", "second": "85"},
+    )
+    assert verify.status_code == 200
+    assert "通过" in verify.text

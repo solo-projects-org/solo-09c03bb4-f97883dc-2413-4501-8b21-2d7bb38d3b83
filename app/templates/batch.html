@@ -29,6 +29,49 @@
 </div>
 {% endif %}
 
+<section class="panel">
+  <h2>外协复核出包（两个原样）</h2>
+  {% if can_package %}
+  <p class="hint">
+    选择该批次中两个不同的原样，下载只含批次号、修订号、原样编号与线性不等式的 JSON。
+    外协实验室在 <a href="/verify">收件核验页</a> 上传该 JSON 并填写两项含水率读数即可判定能否同时成立，
+    无需访问本批次。不等式系数为精确分数，每项含水率限定 0%～100%，
+    闭区间缩成线段或单点时同样按闭区间判定。
+  </p>
+  {% if analysis.feasible %}
+  <form method="post" action="/batches/{{ batch.id }}/packages" class="package-form">
+    <input type="hidden" name="revision" value="{{ batch.revision }}">
+    <label>原样一
+      <select name="sample_a" required>
+        {% for sample_no, range_ in analysis.sample_ranges %}
+        <option value="{{ sample_no }}">{{ sample_no }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>原样二
+      <select name="sample_b" required>
+        {% for sample_no, range_ in analysis.sample_ranges %}
+        <option value="{{ sample_no }}"{% if loop.index == 2 %} selected{% endif %}>{{ sample_no }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="primary">下载复核 JSON</button>
+  </form>
+  <p class="hint">出包依据第 {{ batch.revision }} 版已提交数据；整批矛盾时不出包。</p>
+  {% else %}
+  <div class="alert warn">
+    当前整批化验单互相矛盾，复核出包已拒绝：不存在能同时满足全部报告的原样含水率组合。
+    请先在上方完成复测更正，待整批相容后再出包。
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="alert warn">
+    复核出包仅支持含 {{ package_min_samples }}～{{ package_max_samples }} 个原样的批次，
+    本批有 {{ analysis.sample_count }} 个原样，不能出包。
+  </div>
+  {% endif %}
+</section>
+
 {% if analysis.feasible %}
 <section class="panel">
   <h2>原样含水率可行范围</h2>

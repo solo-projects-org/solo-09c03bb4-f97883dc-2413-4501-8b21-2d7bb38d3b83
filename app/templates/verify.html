@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}外协复核核验{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>外协复核核验</h1>
+  <p class="hint">
+    上传出包方提供的复核 JSON，填写两个所选原样的含水率实测读数（百分数，如 3.15；
+    也接受如 17/4 的分数）。本页只依据 JSON 内的线性不等式判定，无需访问原批次。
+    每项含水率限于 0%～100%，闭区间缩成线段或单点时同样按闭区间判定。
+    可下载 <a href="/static/examples/review_package_example.json" download>示例复核 JSON</a> 试用。
+  </p>
+
+  {% if error %}
+  <div class="alert error" role="alert">
+    <strong>无法核验：</strong>{{ error }}
+  </div>
+  {% endif %}
+
+  <form method="post" action="/verify" enctype="multipart/form-data" class="stack">
+    <label>
+      <span>复核 JSON 文件</span>
+      <input type="file" name="file" accept=".json,application/json">
+    </label>
+    <details>
+      <summary class="hint">或粘贴 JSON 内容</summary>
+      <textarea name="pasted" rows="8" spellcheck="false"
+                placeholder='{"batch_no": 1, "revision": 2, "samples": ["YP-01", "YP-02"], "inequalities": [...]}'>{{ pasted or "" }}</textarea>
+    </details>
+    {% if result %}
+    <div class="reading-grid">
+      <label>
+        <span>原样 {{ package.samples[0] }} 的读数（%）</span>
+        <input type="text" name="first" inputmode="decimal" required value="{{ first }}">
+      </label>
+      <label>
+        <span>原样 {{ package.samples[1] }} 的读数（%）</span>
+        <input type="text" name="second" inputmode="decimal" required value="{{ second }}">
+      </label>
+    </div>
+    {% else %}
+    <div class="reading-grid">
+      <label>
+        <span>原样一读数（%）</span>
+        <input type="text" name="first" inputmode="decimal" required value="{{ first }}">
+      </label>
+      <label>
+        <span>原样二读数（%）</span>
+        <input type="text" name="second" inputmode="decimal" required value="{{ second }}">
+      </label>
+    </div>
+    {% endif %}
+    <button type="submit" class="primary">核对两项读数</button>
+  </form>
+</section>
+
+{% if result %}
+<section class="panel">
+  <h2>核验结论</h2>
+  <p class="meta">
+    批次号 {{ package.batch_no }} · 修订号 {{ package.revision }} ·
+    原样 {{ package.samples[0] }}、{{ package.samples[1] }} ·
+    共 {{ package.inequalities|length }} 条不等式
+  </p>
+  <div class="verdict {{ 'ok' if result.accepted else 'bad' }}" style="margin:14px 0;">
+    {% if result.accepted %}
+      <span class="verdict-label">通过</span>
+      <span class="verdict-detail">
+        两项读数 ({{ result.readings[0]|frac }}%, {{ result.readings[1]|frac }}%)
+        满足全部不等式，能与其余原样的某组含水率一起满足整批化验单。
+      </span>
+    {% else %}
+      <span class="verdict-label">拒绝</span>
+      <span class="verdict-detail">
+        两项读数 ({{ result.readings[0]|frac }}%, {{ result.readings[1]|frac }}%)
+        违反下列不等式，不存在任何其余原样含水率组合能使整批化验单成立。
+      </span>
+    {% endif %}
+  </div>
+
+  <table class="data">
+    <thead>
+      <tr><th>#</th><th>不等式（{{ package.samples[0] }}=x₁，{{ package.samples[1] }}=x₂，单位 %）</th><th>当前左端值</th><th>结果</th></tr>
+    </thead>
+    <tbody>
+      {% for row in result.rows %}
+      <tr>
+        <td>{{ row.index }}</td>
+        <td class="num">
+          {{ row.inequality.a|frac }}·x₁ + {{ row.inequality.b|frac }}·x₂
+          ≤ {{ row.inequality.c|frac }}
+          <span class="hint">（≈ {{ row.inequality.a|approx }}·x₁ + {{ row.inequality.b|approx }}·x₂ ≤ {{ row.inequality.c|approx }}）</span>
+        </td>
+        <td class="num">{{ row.lhs|frac }} <span class="hint">（≈ {{ row.lhs|approx }}）</span></td>
+        <td>
+          {% if row.holds %}<span class="chip ok">满足</span>
+          {% else %}<span class="chip" style="background:var(--bad-soft);color:var(--bad);">违反</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">
+    判定含义：通过表示这一对读数在整批化验单的可行投影内；拒绝表示该点落在投影外。
+    全部计算使用精确有理数，不存在浮点误差。
+  </p>
+</section>
+
+<section class="panel">
+  <h2>出包 JSON 内容</h2>
+  <pre class="json-view">{{ package_document_json }}</pre>
+</section>
+{% endif %}
+{% endblock %}

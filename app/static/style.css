@@ -40,6 +40,9 @@ a { color: var(--accent); }
   letter-spacing: .02em;
 }
 .tagline { color: #b9c7bf; font-size: 13px; }
+.topnav { margin-left: auto; font-size: 13px; }
+.topnav a { color: #f2efe7; text-decoration: none; border: 1px solid #466054; padding: 4px 12px; border-radius: 999px; }
+.topnav a:hover { background: #2c3e36; }
 
 main { max-width: 1120px; margin: 0 auto; padding: 24px 20px 48px; }
 
@@ -156,6 +159,22 @@ form.retest-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wr
 form.retest-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--muted); }
 form.retest-form input[type=number] { width: 108px; }
 form.retest-form button { padding: 7px 12px; font-size: 13px; }
+
+form.package-form { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; margin-top: 10px; }
+form.package-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+form.package-form select { min-width: 180px; }
+.reading-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+pre.json-view {
+  background: #23201b;
+  color: #efe9dc;
+  padding: 14px 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 .button-link {
   display: inline-block;
