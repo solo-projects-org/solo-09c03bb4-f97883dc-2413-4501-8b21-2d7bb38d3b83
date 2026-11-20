@@ -1,0 +1,21 @@
+{
+  "batch_name": "示例：整批相容",
+  "reports": [
+    {
+      "report_no": "BG-2026-201",
+      "samples": [
+        {"sample_no": "YP-01", "grams": 40},
+        {"sample_no": "YP-02", "grams": 40}
+      ],
+      "interval": [3.85, 4.15]
+    },
+    {
+      "report_no": "BG-2026-202",
+      "samples": [
+        {"sample_no": "YP-01", "grams": 25},
+        {"sample_no": "YP-03", "grams": 35}
+      ],
+      "interval": [3.8, 4.2]
+    }
+  ]
+}

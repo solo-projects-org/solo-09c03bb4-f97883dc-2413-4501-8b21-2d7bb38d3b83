@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}矿粉混样化验单核对{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">矿粉混样化验单核对</a>
+    <span class="tagline">质检复测判定 · 同批相容性</span>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    <p>判定依据：同一原样在各报告中共用一个含水率，报告混样含水率按取用质量加权；仅当换用复测区间后整批相容时才会保存复测值。</p>
+  </footer>
+</body>
+</html>

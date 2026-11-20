@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}{{ batch.name }} · 核对结果{% endblock %}
+{% block content %}
+<section class="panel batch-head">
+  <div>
+    <p class="crumb"><a href="/">← 全部批次</a></p>
+    <h1>{{ batch.name }}</h1>
+    <p class="meta">
+      {{ batch.reports|length }} 份报告 · {{ analysis.sample_count }} 个原样 ·
+      第 {{ batch.revision }} 版 · 更新于 {{ batch.updated_at }}
+    </p>
+  </div>
+  <div class="verdict {{ 'ok' if analysis.feasible else 'bad' }}">
+    {% if analysis.feasible %}
+      <span class="verdict-label">通过</span>
+      <span class="verdict-detail">整批相容，所有报告都能由同一组原样含水率解释。</span>
+    {% else %}
+      <span class="verdict-label">互相矛盾</span>
+      <span class="verdict-detail">不存在满足全部报告的原样含水率组合。</span>
+    {% endif %}
+  </div>
+</section>
+
+{% if notice %}
+<div class="alert {{ 'ok' if notice.code == 'retest_saved' else 'warn' }}" role="status">
+  {% if notice.report_no %}<strong>报告 {{ notice.report_no }}</strong>{% endif %}
+  {% if notice.range %}（{{ notice.range }}）{% endif %}
+  {{ notice.text }}
+</div>
+{% endif %}
+
+{% if analysis.feasible %}
+<section class="panel">
+  <h2>原样含水率可行范围</h2>
+  <p class="hint">在该范围内任取一组数值，都能让全部报告的混样含水率落在各自的实测闭区间内。</p>
+  <table class="data">
+    <thead><tr><th>原样编号</th><th>可行含水率</th></tr></thead>
+    <tbody>
+      {% for sample_no, range_ in analysis.sample_ranges %}
+      <tr><td>{{ sample_no }}</td><td class="num">{{ range_|interval }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<section class="panel">
+  <h2>可单独更正并恢复相容的报告</h2>
+  {% if analysis.candidates %}
+  <p class="hint">
+    下面每份报告单独换用复测区间后，其余报告都能相容。允许范围是其余报告对该报告混样含水率的约束；
+    提交的复测闭区间须与允许范围有交集（等价于换用后整批相容），保存时以整批相容为准再次校验。
+  </p>
+  <table class="data candidates">
+    <thead>
+      <tr>
+        <th>报告号</th>
+        <th>当前实测区间</th>
+        <th>其余报告允许的混样含水率</th>
+        <th>提交复测区间</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for candidate in analysis.candidates %}
+      <tr>
+        <td class="report-no">{{ candidate.report_no }}</td>
+        <td class="num">
+          {% for report in batch.reports if report.report_no == candidate.report_no %}
+            {% if report.low != report.original_low or report.high != report.original_high %}
+              <span class="was">{{ report.original_low|pct }} ～ {{ report.original_high|pct }}</span>
+            {% endif %}
+            {{ report.low|pct }} ～ {{ report.high|pct }}
+          {% endfor %}
+        </td>
+        <td class="num strong">{{ candidate.allowed|interval }}</td>
+        <td>
+          <form method="post" action="/batches/{{ batch.id }}/retests" class="retest-form">
+            <input type="hidden" name="revision" value="{{ batch.revision }}">
+            <input type="hidden" name="report_no" value="{{ candidate.report_no }}">
+            {% set echo = submitted if submitted and notice and notice.report_no == candidate.report_no else none %}
+            <label>下限 <input type="number" name="low" step="any" min="0" max="100" required
+                   value="{{ echo.low if echo else candidate.allowed|prefill_low }}"></label>
+            <label>上限 <input type="number" name="high" step="any" min="0" max="100" required
+                   value="{{ echo.high if echo else candidate.allowed|prefill_high }}"></label>
+            <button type="submit" class="primary">保存复测区间</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="alert warn">
+    <strong>没有可单独更正恢复相容的候选报告。</strong>
+    {% if minimal_group %}
+      仅更换任一份报告的复测区间都无法恢复相容，至少要同时更正 {{ minimal_group }} 份报告。
+    {% else %}
+      仅更换 1～2 份报告都无法恢复相容。
+    {% endif %}
+    请扩大复测范围，重新取样化验后再上传同批化验单。
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>化验单明细</h2>
+  <table class="data">
+    <thead>
+      <tr>
+        <th>#</th><th>报告号</th><th>原样取用克数</th>
+        <th>实测含水率区间</th><th>状态</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for report in batch.reports %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td class="report-no">{{ report.report_no }}</td>
+        <td>
+          <ul class="samples">
+            {% for use in report.samples %}
+            <li><span class="sample-no">{{ use.sample_no }}</span>
+                <span class="grams">{{ use.grams|grams }} g</span></li>
+            {% endfor %}
+          </ul>
+        </td>
+        <td class="num">
+          {{ report.low|pct }} ～ {{ report.high|pct }}
+          {% if report.low != report.original_low or report.high != report.original_high %}
+          <div class="was">原报 {{ report.original_low|pct }} ～ {{ report.original_high|pct }}</div>
+          {% endif %}
+        </td>
+        <td>
+          {% if analysis.feasible and (report.low != report.original_low or report.high != report.original_high) %}
+            <span class="chip retested">已复测</span>
+          {% elif report.report_no in candidate_names %}
+            <span class="chip candidate">候选复测</span>
+          {% elif analysis.feasible %}
+            <span class="chip ok">相容</span>
+          {% else %}
+            <span class="chip">保留原值</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if retests %}
+<section class="panel">
+  <h2>复测记录</h2>
+  <table class="data">
+    <thead><tr><th>报告号</th><th>原区间</th><th>复测区间</th><th>保存时间</th></tr></thead>
+    <tbody>
+      {% for event in retests %}
+      <tr>
+        <td class="report-no">{{ event.report_no }}</td>
+        <td class="num">{{ event.old_low|pct }} ～ {{ event.old_high|pct }}</td>
+        <td class="num">{{ event.new_low|pct }} ～ {{ event.new_high|pct }}</td>
+        <td>{{ event.created_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endblock %}

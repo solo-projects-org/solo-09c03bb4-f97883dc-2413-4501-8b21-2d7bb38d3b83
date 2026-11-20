@@ -1,0 +1,94 @@
+{
+  "batch_name": "示例：整批基本相容（含 1 份可疑）",
+  "reports": [
+    {
+      "report_no": "BG-2026-100",
+      "samples": [
+        {
+          "sample_no": "YP-01",
+          "grams": 20
+        },
+        {
+          "sample_no": "YP-02",
+          "grams": 20
+        }
+      ],
+      "interval": [
+        4.45,
+        4.55
+      ]
+    },
+    {
+      "report_no": "BG-2026-101",
+      "samples": [
+        {
+          "sample_no": "YP-01",
+          "grams": 30
+        },
+        {
+          "sample_no": "YP-02",
+          "grams": 20
+        },
+        {
+          "sample_no": "YP-03",
+          "grams": 20
+        }
+      ],
+      "interval": [
+        4.24,
+        4.34
+      ]
+    },
+    {
+      "report_no": "BG-2026-102",
+      "samples": [
+        {
+          "sample_no": "YP-02",
+          "grams": 30
+        },
+        {
+          "sample_no": "YP-01",
+          "grams": 20
+        }
+      ],
+      "interval": [
+        6.36,
+        6.66
+      ]
+    },
+    {
+      "report_no": "BG-2026-103",
+      "samples": [
+        {
+          "sample_no": "YP-02",
+          "grams": 30
+        },
+        {
+          "sample_no": "YP-01",
+          "grams": 20
+        },
+        {
+          "sample_no": "YP-03",
+          "grams": 50
+        }
+      ],
+      "interval": [
+        4.53,
+        4.63
+      ]
+    },
+    {
+      "report_no": "BG-2026-104",
+      "samples": [
+        {
+          "sample_no": "YP-01",
+          "grams": 20
+        }
+      ],
+      "interval": [
+        3.15,
+        3.25
+      ]
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "batch_name": "示例：无单独更正候选（需扩大复测）",
+  "reports": [
+    {
+      "report_no": "BG-2026-301",
+      "samples": [
+        {
+          "sample_no": "YP-01",
+          "grams": 60
+        }
+      ],
+      "interval": [
+        3.1,
+        3.2
+      ]
+    },
+    {
+      "report_no": "BG-2026-302",
+      "samples": [
+        {
+          "sample_no": "YP-02",
+          "grams": 60
+        }
+      ],
+      "interval": [
+        7.0,
+        7.1
+      ]
+    },
+    {
+      "report_no": "BG-2026-303",
+      "samples": [
+        {
+          "sample_no": "YP-01",
+          "grams": 40
+        },
+        {
+          "sample_no": "YP-02",
+          "grams": 40
+        }
+      ],
+      "interval": [
+        5.2,
+        5.3
+      ]
+    },
+    {
+      "report_no": "BG-2026-304",
+      "samples": [
+        {
+          "sample_no": "YP-01",
+          "grams": 20
+        },
+        {
+          "sample_no": "YP-02",
+          "grams": 40
+        }
+      ],
+      "interval": [
+        5.3,
+        5.4
+      ]
+    }
+  ]
+}

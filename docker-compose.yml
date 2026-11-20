@@ -1,0 +1,15 @@
+services:
+  web:
+    build: .
+    image: moisture-reconcile:latest
+    container_name: moisture-reconcile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_PATH: /data/moisture.db
+    volumes:
+      - moisture-data:/data
+    restart: unless-stopped
+
+volumes:
+  moisture-data:
